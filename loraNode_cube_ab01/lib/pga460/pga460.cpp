@@ -116,11 +116,11 @@ byte P2_THR_13 = 0x80;
 byte P2_THR_14 = 0x80;
 byte P2_THR_15 = 0x80;
 
-PGA460::PGA460(int en_pin, int tst_pin, Uart* serial_port)
+PGA460::PGA460(int tx_pin, int rx_pin, int en_pin, int tst_pin)
 {
   _en_pin = en_pin;
   _tst_pin = tst_pin;
-  _serial_port = serial_port;
+  _serial_port = new softSerial(tx_pin, rx_pin);
   status = 0;
 }
 
@@ -140,7 +140,7 @@ void PGA460::begin()
   delay(100);
   pinMode(_tst_pin, INPUT_PULLUP);
 
-  _serial_port->begin(57600, SERIAL_8N2);
+  _serial_port->begin(57600);
 
   delay(100);
 
@@ -173,17 +173,17 @@ void PGA460::begin()
   status=0;
 
   readreg(0x4C, &diag, &data);
-  SerialUSB.println("DEV_STAT0: " + String(data));
+  Serial.println("DEV_STAT0: " + String(data));
   readreg(0x4D, &diag, &data);
-  SerialUSB.println("DEV_STAT1: " + String(data));
+  Serial.println("DEV_STAT1: " + String(data));
 
   if (readreg(0x1C, &diag, &data)) {
-    SerialUSB.println("Read FREQUENCY register: " + String(data) + " DIAG: " + String(diag));
+    Serial.println("Read FREQUENCY register: " + String(data) + " DIAG: " + String(diag));
     if (data != 52) status++;
   }
   else status++;
   if (readreg(0x1E, &diag, &data)) {
-    SerialUSB.println("Read PULSE_P1 register: " + String(data) + " DIAG: " + String(diag));
+    Serial.println("Read PULSE_P1 register: " + String(data) + " DIAG: " + String(diag));
     if (data != 0x63) status++;
   }
   else status++;
@@ -195,7 +195,7 @@ void PGA460::end()
   // writereg(0x26, DECPL_TEMP || 0x20);
   
   deep_sleep();
-  _serial_port->end();
+  //_serial_port->end();
 }
 
 void PGA460::write_default_values()
@@ -326,7 +326,7 @@ bool PGA460::readreg(uint8_t regaddr, uint8_t* diag, uint8_t* regdata) {
   *diag = buf[0];
   *regdata = buf[1];
 
-  if (!(*diag & 0x40)) SerialUSB.println(*diag, HEX);
+  if (!(*diag & 0x40)) Serial.println(*diag, HEX);
 
   if ((*diag & 0x40) && calc_checksum(buf, 2) == buf[2])
     return true;
@@ -585,7 +585,7 @@ bool PGA460::getUSmeasurement(uint8_t preset, uint16_t *tof, uint8_t *width, uin
   // buf[len - 1] = checksum;
   _serial_port->write(buf, len);
 
-  // SerialUSB.print("RX <--- ");
+  // Serial.print("RX <--- ");
   len = 6;
   _serial_port->readBytes(buf, len);
 
@@ -663,11 +663,11 @@ bool PGA460::getNOBALdata(uint8_t *data, uint8_t *diag) {
   // Enable echo data dump
   writereg(0x40, 0x80); // DATADUMP_EN=1 in EE_CNTRL
 
-  SerialUSB.println("Taking 100 measurements: ");
+  Serial.println("Taking 100 measurements: ");
 
   // Take 100 measurements
   for (i=0; i<100; i++) {
-    SerialUSB.print(".");
+    Serial.print(".");
     // Burst and listen
     len        = 4;
     buf[1]     = 0;
@@ -710,10 +710,10 @@ bool PGA460::getNOBALdata(uint8_t *data, uint8_t *diag) {
 
 
   // Calculate average echo data, save data and print result  
-  SerialUSB.println("Echo Data: ");
+  Serial.println("Echo Data: ");
   for (i=0; i<128; i++) {
     echodata[i] = echodata[i] / 100;
-    SerialUSB.println(echodata[i]);
+    Serial.println(echodata[i]);
     data[i] = echodata[i];
   }
 

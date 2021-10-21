@@ -1,6 +1,8 @@
 #ifndef pga460_h
 #define pga460_h
 #include "Arduino.h"
+#include "softSerial.h"
+
 
 struct obj_t {
     uint8_t   node_id;
@@ -13,7 +15,7 @@ struct obj_t {
 class PGA460
 {
   public:
-    PGA460(int en_pin, int tst_pin, Uart* serial_port);
+    PGA460(int tx_pin, int rx_pin, int en_pin, int tst_pin);
     void begin();
     void end();
     int  get_status();
@@ -24,7 +26,7 @@ class PGA460
   private:
     int _en_pin;
     int _tst_pin;
-    Uart* _serial_port;
+    softSerial* _serial_port;
     int status;
 
     uint8_t calc_checksum(uint8_t* buf, int len);

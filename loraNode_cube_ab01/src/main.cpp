@@ -10,9 +10,23 @@
 
 #include "LoRaWan_APP.h"
 #include "Arduino.h"
-#include <Wire.h>               
-#include "HT_SH1107Wire.h"
 #include <CRC32.h>
+#include <pga460.h>
+
+//
+// Software Serial port to PGA460
+//
+//softSerial pga460_serial(GPIO1 /*TX pin*/, GPIO2 /*RX pin*/);
+
+//
+// PGA460
+//
+#define PGA460_TX  GPIO1
+#define PGA460_RX  GPIO2
+#define PGA460_EN  GPIO3
+#define PGA460_TST GPIO5
+PGA460 pga460(PGA460_TX, PGA460_RX, PGA460_EN, PGA460_TST);
+
 
 #define NODE_ID 2
 
@@ -57,13 +71,6 @@ int16_t rssi,rxSize;
 //
 // Lora Packet
 //
-struct obj_t {
-    uint8_t   node_id;
-    double    distance_m;
-    double    vbat;
-    double    temp;
-    uint32_t  crc32;
-};
 obj_t obj;
 CRC32 crc;
 volatile bool txing = false;
@@ -77,11 +84,6 @@ int packet_count=0;
 static TimerEvent_t sleep;
 static TimerEvent_t wakeUp;
 uint8_t lowpower=1;
-
-//
-// OLED
-//
-SH1107Wire  oled(0x3c, 500000, SDA, SCL ,GEOMETRY_128_64,GPIO10); // addr, freq, sda, scl, resolution, rst
 
 //
 // Functions
@@ -101,19 +103,18 @@ void onWakeUp();
  * Main setup
  ****************************************************************************/
 void setup() {
-    Serial.begin(115200);
+  Serial.begin(115200);
 
-    //VextON();
-    //delay(100);
+  //VextON();
+  //delay(100);
 
-    // Initialising the UI will init the oled too.
-    //oled.init();
-    //oled.setFont(ArialMT_Plain_24);
+  rssi=0;
+  obj.distance_m = 0.0;
 
-    rssi=0;
-    obj.distance_m = 0.55;
-	
-    radioBegin();
+  radioBegin();
+
+  pga460.begin();
+  Serial.printf("PGA460 status = %d\n", pga460.get_status());
 
   //TimerInit( &sleep, onSleep );
   TimerInit( &wakeUp, onWakeUp );
@@ -132,13 +133,11 @@ void loop()
   }
 
   if (!txing) {
+    pga460.get_distance(&obj);
     obj.node_id = NODE_ID;
-    obj.distance_m = obj.distance_m + 0.1;
     obj.vbat = (double) getBatteryVoltage() / 1000;
-    obj.temp = 17.65;
+    obj.temp = 15.65;
     obj.crc32 = 0;
-
-    if (obj.distance_m > 3.0) obj.distance_m = 0.55;
 
     crc.reset();
     crc.setPolynome(0xDEADBEEF);
