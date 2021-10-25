@@ -19,17 +19,24 @@
 //softSerial pga460_serial(GPIO1 /*TX pin*/, GPIO2 /*RX pin*/);
 
 //
+// Config
+//
+#define CONFIG_PIN GPIO0
+bool SERIAL_ON; 
+
+//
 // PGA460
 //
 #define PGA460_TX  GPIO1
 #define PGA460_RX  GPIO2
 #define PGA460_EN  GPIO3
 #define PGA460_TST GPIO5
-PGA460 pga460(PGA460_TX, PGA460_RX, PGA460_EN, PGA460_TST);
+
+softSerial serial_port(PGA460_TX, PGA460_RX);
+PGA460 pga460(&serial_port, PGA460_TX, PGA460_RX, PGA460_EN, PGA460_TST);
 
 
-#define NODE_ID 2
-
+#define NODE_ID 1
 
 /*
  * set LoraWan_RGB to 1,the RGB active in loraWan
@@ -37,7 +44,7 @@ PGA460 pga460(PGA460_TX, PGA460_RX, PGA460_EN, PGA460_TST);
  * RGB green means received done;
  */
 #ifndef LoraWan_RGB
-#define LoraWan_RGB 0
+#define LoraWan_RGB 1
 #endif
 
 #define RF_FREQUENCY                                915000000 // Hz
@@ -80,10 +87,11 @@ int packet_count=0;
 // Low Power
 //
 #define timetillsleep 500
-#define timetillwakeup 30000
+//#define timetillwakeup 600100
+#define timetillwakeup 60100
 static TimerEvent_t sleep;
 static TimerEvent_t wakeUp;
-uint8_t lowpower=1;
+uint8_t lowpower=0;
 
 //
 // Functions
@@ -103,22 +111,36 @@ void onWakeUp();
  * Main setup
  ****************************************************************************/
 void setup() {
-  Serial.begin(115200);
+//  pinMode(CONFIG_PIN, INPUT_PULLUP);
+//  delay(10);
 
-  //VextON();
-  //delay(100);
+  VextON();
+  turnOnRGB(COLOR_RECEIVED,500);
+  turnOffRGB();
+  VextOFF();
+
+//  if (digitalRead(CONFIG_PIN) == HIGH) {
+  if (0) {
+    SERIAL_ON = true;
+
+
+    Serial.begin(115200);
+    delay(1000);
+    Serial.println(__FILE__);
+    Serial.println(__DATE__);
+  }
+//  pinMode(CONFIG_PIN, INPUT);
 
   rssi=0;
   obj.distance_m = 0.0;
 
   radioBegin();
 
-  pga460.begin();
-  Serial.printf("PGA460 status = %d\n", pga460.get_status());
+  pga460.begin(SERIAL_ON);
 
   //TimerInit( &sleep, onSleep );
   TimerInit( &wakeUp, onWakeUp );
-  onSleep();
+  //onSleep();
 }
 
 
@@ -138,6 +160,12 @@ void loop()
     obj.vbat = (double) getBatteryVoltage() / 1000;
     obj.temp = 15.65;
     obj.crc32 = 0;
+
+    if (SERIAL_ON) {
+        Serial.print(obj.distance_m);
+        Serial.print(" ");
+        Serial.println(obj.vbat);
+    }
 
     crc.reset();
     crc.setPolynome(0xDEADBEEF);
@@ -226,15 +254,31 @@ void onSleep()
   lowpower=1;
 //  turnOffRGB();
   radioStop();
+  pga460.end();
+
+  if (SERIAL_ON) {
+    Serial.flush();
+    Serial.end();
+  }
+
   //timetillwakeup ms later wake up;
-  TimerSetValue( &wakeUp, timetillwakeup );
+  TimerSetValue( &wakeUp, timetillwakeup + random(100) );
   TimerStart( &wakeUp );
 }
+
 void onWakeUp()
 {
 //  Serial.printf("Woke up, %d ms later into lowpower mode.\r\n",timetillsleep);
+  //boardInitMcu();
+  HW_Reset(0);
   lowpower=0;
-  txing = false;	
+  txing = false;
+
+  if (SERIAL_ON) {
+    Serial.begin(115200);	
+  }
+
+  pga460.begin(SERIAL_ON);
   radioBegin();
   //timetillsleep ms later into lowpower mode;
   //TimerSetValue( &sleep, timetillsleep );

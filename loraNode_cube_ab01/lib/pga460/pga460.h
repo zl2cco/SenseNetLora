@@ -15,8 +15,8 @@ struct obj_t {
 class PGA460
 {
   public:
-    PGA460(int tx_pin, int rx_pin, int en_pin, int tst_pin);
-    void begin();
+    PGA460(softSerial *serial_port, int tx_pin, int rx_pin, int en_pin, int tst_pin);
+    void begin(bool serial_on);
     void end();
     int  get_status();
     void deep_sleep();
@@ -26,8 +26,12 @@ class PGA460
   private:
     int _en_pin;
     int _tst_pin;
+    int _tx_pin;
+    int _rx_pin;
     softSerial* _serial_port;
     int status;
+    int serial_status;
+    bool _serial_on;
 
     uint8_t calc_checksum(uint8_t* buf, int len);
     void writereg(uint8_t reg, uint8_t data);

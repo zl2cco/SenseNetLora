@@ -70,7 +70,8 @@ byte CURR_LIM_P2 = 0xFF;
 byte REC_LENGTH = 0x1C;
 byte FREQ_DIAG = 0x00;
 byte SAT_FDIAG_TH = 0xEE;
-byte FVOLT_DEC = 0x7C;
+byte FVOLT_DEC = 0x78;
+//byte FVOLT_DEC = 0x7C;
 byte DECPL_TEMP = 0x0A;
 byte DSP_SCALE = 0x00;
 byte TEMP_TRIM = 0x00;
@@ -116,17 +117,44 @@ byte P2_THR_13 = 0x80;
 byte P2_THR_14 = 0x80;
 byte P2_THR_15 = 0x80;
 
-PGA460::PGA460(int tx_pin, int rx_pin, int en_pin, int tst_pin)
+void pga460_delay_ms (uint32 ms) 
+{
+  uint32_t now = millis();
+  uint32_t start = millis();
+  uint32_t delta = 0;
+
+  while (delta < ms) {
+    now = millis();
+    if (now < start) {
+      delta = (UINT32_MAX - start) + now;
+    }
+    else {
+      delta = now - start;
+    }
+  }
+}
+
+PGA460::PGA460(softSerial *serial_port, int tx_pin, int rx_pin, int en_pin, int tst_pin)
 {
   _en_pin = en_pin;
   _tst_pin = tst_pin;
-  _serial_port = new softSerial(tx_pin, rx_pin);
+  _tx_pin = tx_pin;
+  _rx_pin = rx_pin;
+  _serial_port = serial_port;
   status = 0;
+  serial_status = 0;
 }
 
 
-void PGA460::begin()
+void PGA460::begin(bool serial_on)
 {
+  uint8_t diag, data;
+
+  _serial_on = serial_on;
+
+  _serial_port->begin(57600);
+
+
   // Disable power supply
   pinMode(_en_pin, OUTPUT);
   digitalWrite(_en_pin, LOW);
@@ -137,12 +165,10 @@ void PGA460::begin()
   
   // Enable the power supply
   digitalWrite(_en_pin, HIGH);
-  delay(100);
+  pga460_delay_ms(100);
   pinMode(_tst_pin, INPUT_PULLUP);
 
-  _serial_port->begin(57600);
-
-  delay(100);
+  pga460_delay_ms(100);
 
   // Configure PGA460
   write_default_values();   // load default values
@@ -151,7 +177,7 @@ void PGA460::begin()
 //  set_thresholds(4);        // Set thresholds
 
   writereg(0x1C, 52);       // Frequency
-  writereg(0x1E, 0x03);     // Preset 1 sends 3 pulses; and UART_DIAG UART diagnostic page
+  writereg(0x1E, 0x43);     // Preset 1 sends 3 pulses; and UART_DIAG System diagnostic page
 
 //   writereg(0x22, 0x22);     // Set record time to 4.18m (12.288ms)
 //   writereg(0x1E, 0x21);     // Preset 1 sends 3 pulses; and UART_DIAG UART diagnostic page
@@ -165,28 +191,27 @@ void PGA460::begin()
 //   set_tv_gain(3);
 
 
-  delay(10);
+  pga460_delay_ms(10);
 
 
   // Check status
-  uint8_t diag, data;
   status=0;
 
-  readreg(0x4C, &diag, &data);
-  Serial.println("DEV_STAT0: " + String(data));
-  readreg(0x4D, &diag, &data);
-  Serial.println("DEV_STAT1: " + String(data));
+  if (_serial_on) {
+    Serial.print("PGA460 device status: ");
+    readreg(0x4C, &diag, &data);
+    Serial.print(" DEV_STAT0: " + String(data));
+    readreg(0x4D, &diag, &data);
+    Serial.println(" DEV_STAT1: " + String(data));
 
-  if (readreg(0x1C, &diag, &data)) {
+    Serial.print((readreg(0x1C, &diag, &data)) ? "OK: " : "ERROR: ");
     Serial.println("Read FREQUENCY register: " + String(data) + " DIAG: " + String(diag));
     if (data != 52) status++;
+
+    Serial.print((readreg(0x1E, &diag, &data)) ? "OK: " : "ERROR: ");
+    Serial.println("Read PULSE_P1 register: " + String(data&0x1F) + " DIAG: " + String(diag));
+    if ((data&0x1F) != 0x3) status++;
   }
-  else status++;
-  if (readreg(0x1E, &diag, &data)) {
-    Serial.println("Read PULSE_P1 register: " + String(data) + " DIAG: " + String(diag));
-    if (data != 0x63) status++;
-  }
-  else status++;
 }
 
 void PGA460::end()
@@ -194,6 +219,7 @@ void PGA460::end()
   // writereg(0x25, FVOLT_DEC || 0x18);
   // writereg(0x26, DECPL_TEMP || 0x20);
   
+  detachInterrupt(_rx_pin);
   deep_sleep();
   //_serial_port->end();
 }
@@ -321,12 +347,18 @@ bool PGA460::readreg(uint8_t regaddr, uint8_t* diag, uint8_t* regdata) {
    _serial_port->write(buf, len);
 
   // P-TO-C
+//  while (_serial_port->available() < 3) ;
    _serial_port->readBytes(buf, 3);
 
   *diag = buf[0];
   *regdata = buf[1];
 
-  if (!(*diag & 0x40)) Serial.println(*diag, HEX);
+  if (_serial_on) {
+    if (!(*diag & 0x40)) {
+      Serial.print("Diagnostic: ");
+      Serial.println(*diag, HEX);
+    }
+  }
 
   if ((*diag & 0x40) && calc_checksum(buf, 2) == buf[2])
     return true;
@@ -345,7 +377,7 @@ void PGA460::writereg(uint8_t reg, uint8_t data) {
   buf[4]   = calc_checksum(&buf[1], len - 2);
 
    _serial_port->write(buf, len);
-  delay(1);
+  pga460_delay_ms(1);
 
 }
 
@@ -545,7 +577,7 @@ void PGA460::set_thresholds(byte thr)
 
   buf[34] = calc_checksum(&buf[1], 33);
   _serial_port->write(buf, 35);
-  delay(1);
+  pga460_delay_ms(1);
 }
 
 
@@ -575,7 +607,7 @@ bool PGA460::getUSmeasurement(uint8_t preset, uint16_t *tof, uint8_t *width, uin
   checksum   = calc_checksum(&buf[1], len - 2);
   buf[len - 1] = checksum;
   _serial_port->write(buf, len);
-  delay(20);
+  pga460_delay_ms(20);
 
 
   //Get ultrasonic measurement
@@ -595,7 +627,7 @@ bool PGA460::getUSmeasurement(uint8_t preset, uint16_t *tof, uint8_t *width, uin
   else
     ret = false;
 
-  if (buf[0] != 0x40) {
+  if (buf[0]&0xC0 != 0x40) {
     ret = false;
   }
 
@@ -633,6 +665,10 @@ double PGA460::get_distance(obj_t *obj) {
         }
         else
             errors++;
+
+        if (_serial_on) {
+          Serial.printf("0x%0x: ", diag);
+        }
     }
 
     if (count > 0)
@@ -675,7 +711,7 @@ bool PGA460::getNOBALdata(uint8_t *data, uint8_t *diag) {
     checksum   = calc_checksum(&buf[1], len - 2);
     buf[len - 1] = checksum;
     _serial_port->write(buf, len);
-    delay(20);
+    pga460_delay_ms(20);
 
 
     //Get transducer echo data dump
@@ -704,7 +740,7 @@ bool PGA460::getNOBALdata(uint8_t *data, uint8_t *diag) {
 
     *diag     = buf[0];
 
-    delay(20);
+    pga460_delay_ms(20);
 
   }
 
